@@ -97,8 +97,8 @@ function App() {
       
       {/* 🌟 UNIFIED TOP NAVIGATION BAR */}
       <nav className="dark:bg-zinc-900 bg-white p-4 shadow-sm flex justify-between items-center border-b dark:border-zinc-800 border-gray-200 sticky top-0 z-[100]">
-        <h1 className="text-lg font-black tracking-wider dark:text-white text-zinc-900 flex items-center gap-2">
-          <span className="text-purple-600 dark:text-purple-500">🏛️</span> PROJECT STOICISM
+        <h1 className="text-lg font-black tracking-wider dark:text-white text-zinc-900 flex items-center gap-3">
+          <img src="/logo.png" alt="Project Stoicism Logo" className="w-8 h-8 object-contain" /> PROJECT STOICISM
         </h1>
         
         {user && (
