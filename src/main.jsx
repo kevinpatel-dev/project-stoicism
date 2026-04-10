@@ -1,3 +1,7 @@
+import { registerSW } from 'virtual:pwa-register'
+
+// This registers the service worker so your app works offline and can be installed
+registerSW({ immediate: true })
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
