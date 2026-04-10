@@ -1,33 +1,38 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { doc, setDoc, updateDoc, collection, query, where, onSnapshot, deleteDoc } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, collection, query, where, deleteDoc, setDoc } from 'firebase/firestore';
+// 🌟 Added deleteUser from firebase/auth
+import { deleteUser } from 'firebase/auth';
 import TaskForm from './TaskForm';
 
-const Dashboard = ({ user, isDarkMode, setIsDarkMode }) => {
-  const [userData, setUserData] = useState({ xp: 0, level: 1, streak: 0, name: '', age: '', heroClass: 'Novice', bio: '' });
+const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModal }) => {
+  const [userData, setUserData] = useState(null);
   const [tasks, setTasks] = useState([]);
-  const [activeTab, setActiveTab] = useState('active'); 
-  const [sortBy, setSortBy] = useState('newest');
-  const [showSettings, setShowSettings] = useState(false);
-  const [editProfile, setEditProfile] = useState({ name: '', age: '', heroClass: '', bio: '' });
+  const [activeTab, setActiveTab] = useState('active');
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [heroNameInput, setHeroNameInput] = useState('');
 
-  const xpToNextLevel = Math.pow(userData.level, 2) * 100;
-  const progressPercentage = Math.min((userData.xp / xpToNextLevel) * 100, 100);
+  const getHeroClass = (level) => {
+    if (level <= 5) return "Novice";
+    if (level <= 10) return "Initiate";
+    if (level <= 20) return "Practitioner";
+    if (level <= 35) return "Scholar";
+    if (level <= 50) return "Philosopher";
+    return "Sage";
+  };
 
   useEffect(() => {
+    if (!user) return;
+
     const userRef = doc(db, "users", user.uid);
-    const unsubUser = onSnapshot(userRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
+    const unsub = onSnapshot(userRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
         setUserData(data);
-        setEditProfile({ 
-          name: data.name || '', 
-          age: data.age || '', 
-          heroClass: data.heroClass || 'Novice', 
-          bio: data.bio || '' 
-        });
+        if (!data.name || data.name.trim() === '') setShowOnboarding(true);
+        checkStreakReset(data);
       } else {
-        setDoc(userRef, { xp: 0, level: 1, streak: 0, name: '', age: '', heroClass: 'Novice', bio: '' }); 
+        setDoc(userRef, { xp: 0, level: 1, streak: 0, name: '', age: '', bio: '', hardMode: false });
       }
     });
 
@@ -36,218 +41,256 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode }) => {
       setTasks(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
-    return () => { unsubUser(); unsubTasks(); };
-  }, [user.uid]);
+    return () => { unsub(); unsubTasks(); };
+  }, [user]);
+
+  const saveOnboardingName = async () => {
+    if (!heroNameInput.trim()) return;
+    await updateDoc(doc(db, "users", user.uid), { name: heroNameInput });
+    setShowOnboarding(false);
+  };
+
+  const checkStreakReset = async (data) => {
+    if (!data.lastCompletionDate) return;
+    const hoursSinceLast = (new Date() - new Date(data.lastCompletionDate)) / (1000 * 60 * 60);
+    
+    if (hoursSinceLast > 48 && data.streak > 0) { 
+      await updateDoc(doc(db, "users", user.uid), {
+        streak: 0,
+        xp: data.hardMode ? Math.max(0, data.xp - 50) : data.xp 
+      });
+    }
+  };
 
   const completeTask = async (task) => {
-    const totalReward = ({ easy: 10, medium: 25, hard: 50 }[task.difficulty] || 10) + ({ low: 0, medium: 5, high: 10 }[task.priority] || 0);
+    const baseReward = ({ easy: 10, medium: 25, hard: 50 }[task.difficulty] || 10);
+    const multiplier = userData.hardMode ? 1.5 : 1.0;
+    const totalReward = Math.floor(baseReward * multiplier);
+
     let newXp = userData.xp + totalReward;
     let newLevel = userData.level;
+    const xpToNext = Math.pow(newLevel, 2) * 100;
 
-    if (newXp >= xpToNextLevel) {
-      newXp = newXp - xpToNextLevel; 
+    if (newXp >= xpToNext) {
+      newXp -= xpToNext;
       newLevel += 1;
     }
 
     await updateDoc(doc(db, "tasks", task.id), { completed: true });
-    await updateDoc(doc(db, "users", user.uid), { xp: newXp, level: newLevel, streak: userData.streak + 1 });
+    await updateDoc(doc(db, "users", user.uid), { 
+      xp: newXp, 
+      level: newLevel, 
+      streak: userData.streak + 1,
+      lastCompletionDate: new Date().toISOString()
+    });
   };
 
-  const deleteTask = async (id) => await deleteDoc(doc(db, "tasks", id));
-  const saveSettings = async () => {
-    await updateDoc(doc(db, "users", user.uid), { ...editProfile });
-    setShowSettings(false);
+  const deleteTask = async (id) => {
+    if (window.confirm("Abandon this quest?")) {
+      await deleteDoc(doc(db, "tasks", id));
+    }
   };
+
+  const resetAllProgress = async () => {
+    if (window.confirm("Are you sure? This will wipe your Level, XP, and Streak forever.")) {
+      await updateDoc(doc(db, "users", user.uid), {
+        xp: 0, level: 1, streak: 0, hardMode: false
+      });
+      setActiveModal(null);
+    }
+  };
+
+  // 🌟 NEW: The Ultimate Delete Function
+  const deleteAccount = async () => {
+    const confirmMsg = "CRITICAL WARNING: This will permanently delete your entire account, all quests, and all progress. This action CANNOT be undone. Are you absolutely sure?";
+    if (window.confirm(confirmMsg)) {
+      try {
+        // 1. Delete their profile data document
+        await deleteDoc(doc(db, "users", user.uid));
+        // 2. Delete the actual authentication user
+        await deleteUser(user);
+        // App.jsx will automatically see the user is gone and throw them to the login screen!
+      } catch (error) {
+        console.error("Account deletion failed:", error);
+        // Firebase security check: Did they log in too long ago?
+        if (error.code === 'auth/requires-recent-login') {
+          alert("For your security, please log out and log back in right now before deleting your account.");
+        } else {
+          alert("Failed to delete account: " + error.message);
+        }
+      }
+    }
+  };
+
+  if (!userData) return null;
 
   const displayedTasks = [...tasks]
     .filter(t => activeTab === 'active' ? !t.completed : t.completed)
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 
+  const xpToNextLevel = Math.pow(userData.level, 2) * 100;
+
   return (
-    <div className="flex flex-col gap-8 animate-in fade-in duration-700">
+    <div className="max-w-5xl mx-auto animate-in fade-in duration-500">
+      
+      {showOnboarding && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-zinc-950/98 backdrop-blur-xl animate-in zoom-in duration-500">
+          <div className="text-center max-w-sm">
+            <h2 className="text-4xl font-black mb-4 text-white">Welcome, Hero.</h2>
+            <p className="text-zinc-500 mb-10 font-bold uppercase tracking-widest text-xs">What should we call you?</p>
+            <input 
+              autoFocus className="w-full bg-transparent border-b-2 border-purple-600 p-4 text-3xl text-center text-white outline-none focus:border-white transition-all mb-10" 
+              placeholder="Name" value={heroNameInput} 
+              onChange={(e) => setHeroNameInput(e.target.value)} 
+              onKeyDown={(e) => e.key === 'Enter' && saveOnboardingName()} 
+            />
+            <button onClick={saveOnboardingName} className="bg-purple-600 text-white px-12 py-4 rounded-full font-black hover:bg-purple-700 transition-all shadow-2xl shadow-purple-500/40 active:scale-95">BEGIN JOURNEY</button>
+          </div>
+        </div>
+      )}
+
       <TaskForm userId={user.uid} />
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        
-        {/* --- HERO PROFILE CARD (Points 1, 2, 3, 6, 7) --- */}
-        <section className="lg:col-span-4 dark:bg-zinc-900 bg-white p-8 rounded-2xl shadow-xl border dark:border-zinc-800 border-gray-100 relative overflow-hidden">
-          {/* Subtle background decoration */}
-          <div className="absolute top-0 right-0 p-4 opacity-10">
-            <span className="text-8xl select-none">🏛️</span>
-          </div>
-
-          <div className="relative z-10">
-            <div className="flex justify-between items-start mb-6">
-              <div>
-                <h2 className="text-3xl font-black dark:text-white text-zinc-900 leading-tight">
-                  {userData.name || "Nameless Hero"}
-                </h2>
-                <span className="inline-block mt-2 px-3 py-1 rounded-full bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400 text-xs font-black uppercase tracking-widest border border-purple-200 dark:border-purple-800">
-                  {userData.heroClass}
-                </span>
-              </div>
-              <button 
-                onClick={() => setShowSettings(true)} 
-                className="p-2 rounded-xl dark:bg-zinc-800 bg-gray-100 dark:text-zinc-400 text-gray-500 hover:text-purple-600 transition-colors"
-              >
-                ⚙️
-              </button>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start mb-20">
+        <div className="lg:col-span-4 space-y-6 lg:sticky lg:top-24">
+          <section className="dark:bg-zinc-900 bg-white p-8 rounded-[2rem] border dark:border-zinc-800 border-gray-100 shadow-xl relative overflow-hidden">
+            <div className="mb-8 relative z-10">
+              <h3 className="text-4xl font-black truncate tracking-tight">{userData.name || "Hero"}</h3>
+              <span className="inline-block mt-3 px-4 py-1.5 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 text-[10px] font-black uppercase tracking-[0.2em] border border-purple-500/20">
+                {getHeroClass(userData.level)}
+              </span>
             </div>
-
-            {userData.bio && (
-              <p className="text-sm dark:text-zinc-400 text-gray-600 italic mb-8 border-l-2 border-purple-500 pl-4 leading-relaxed">
-                "{userData.bio}"
-              </p>
-            )}
-
-            <div className="space-y-8">
-              {/* XP & Level Section */}
+            
+            <div className="space-y-10 relative z-10">
               <div>
-                <div className="flex justify-between items-end mb-3">
-                  <div className="flex flex-col">
-                    <span className="text-xs font-bold dark:text-zinc-500 text-gray-400 uppercase tracking-tighter">Current Progress</span>
-                    <span className="text-xl font-black dark:text-white text-zinc-900">Level {userData.level}</span>
-                  </div>
-                  <span className="text-sm font-bold text-purple-600 dark:text-purple-400">
-                    {userData.xp} <span className="dark:text-zinc-600 text-gray-300">/</span> {xpToNextLevel} XP
+                <div className="flex justify-between items-end mb-4">
+                  <span className="text-2xl font-black tracking-tighter">Level {userData.level}</span>
+                  <span className="text-xs font-bold text-zinc-500">{userData.xp} / {xpToNextLevel} XP</span>
+                </div>
+                <div className="h-4 w-full bg-gray-100 dark:bg-zinc-950 rounded-full overflow-hidden p-1 border dark:border-zinc-800 border-gray-200">
+                  <div className="h-full bg-gradient-to-r from-purple-600 to-fuchsia-500 rounded-full transition-all duration-1000" style={{ width: `${(userData.xp / xpToNextLevel) * 100}%` }}></div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-5 rounded-[1.5rem] dark:bg-zinc-950 bg-gray-50 border dark:border-zinc-800 border-gray-200 text-center shadow-inner">
+                  <span className="text-[10px] font-black uppercase text-zinc-500 block mb-2 tracking-widest">Streak</span>
+                  <span className="text-3xl font-black text-orange-500">🔥 {userData.streak}</span>
+                </div>
+                <div className="p-5 rounded-[1.5rem] dark:bg-zinc-950 bg-gray-50 border dark:border-zinc-800 border-gray-200 text-center shadow-inner">
+                  <span className="text-[10px] font-black uppercase text-zinc-500 block mb-2 tracking-widest">Mode</span>
+                  <span className={`text-sm font-black ${userData.hardMode ? 'text-red-500' : 'text-green-500'}`}>
+                    {userData.hardMode ? 'HARD CORE' : 'NORMAL'}
                   </span>
                 </div>
-                
-                {/* Modernized Progress Bar */}
-                <div className="h-4 w-full bg-gray-100 dark:bg-zinc-950 rounded-full overflow-hidden border dark:border-zinc-800 border-gray-200 shadow-inner p-0.5">
-                  <div 
-                    className="h-full rounded-full bg-gradient-to-r from-purple-600 via-purple-400 to-fuchsia-400 transition-all duration-1000 ease-out relative"
-                    style={{ width: `${progressPercentage}%` }}
-                  >
-                    <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Streak Section (Point 6) */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="dark:bg-zinc-950 bg-gray-50 p-4 rounded-2xl border dark:border-zinc-800 border-gray-100 text-center">
-                  <span className="block text-[10px] font-black dark:text-zinc-500 text-gray-400 uppercase mb-1 tracking-widest">Global Streak</span>
-                  <div className="flex items-center justify-center gap-2">
-                    <span className="text-2xl font-black text-orange-500">🔥 {userData.streak}</span>
-                  </div>
-                </div>
-                <div className="dark:bg-zinc-950 bg-gray-50 p-4 rounded-2xl border dark:border-zinc-800 border-gray-100 text-center">
-                  <span className="block text-[10px] font-black dark:text-zinc-500 text-gray-400 uppercase mb-1 tracking-widest">Hero Age</span>
-                  <span className="text-2xl font-black dark:text-white text-zinc-900">{userData.age || "--"}</span>
-                </div>
               </div>
             </div>
-          </div>
-        </section>
+          </section>
+        </div>
 
-        {/* --- TASK LIST SECTION --- */}
-        <section className="lg:col-span-8 space-y-6">
-          <div className="flex gap-4 border-b dark:border-zinc-800 border-gray-200">
-            <button 
-              onClick={() => setActiveTab('active')} 
-              className={`pb-4 px-2 font-black text-sm uppercase tracking-widest transition-all ${activeTab === 'active' ? 'text-purple-600 border-b-2 border-purple-600' : 'text-gray-400 border-b-2 border-transparent hover:text-gray-600'}`}
-            >
-              Active Quests
-            </button>
-            <button 
-              onClick={() => setActiveTab('history')} 
-              className={`pb-4 px-2 font-black text-sm uppercase tracking-widest transition-all ${activeTab === 'history' ? 'text-purple-600 border-b-2 border-purple-600' : 'text-gray-400 border-b-2 border-transparent hover:text-gray-600'}`}
-            >
-              Logbook
-            </button>
+        <div className="lg:col-span-8 space-y-8">
+          <div className="flex gap-8 border-b dark:border-zinc-800 border-gray-200">
+            <button onClick={() => setActiveTab('active')} className={`pb-4 font-black text-sm uppercase tracking-widest transition-all ${activeTab === 'active' ? 'text-purple-600 border-b-2 border-purple-600' : 'text-gray-400 dark:text-zinc-500 hover:text-gray-600 dark:hover:text-zinc-300'}`}>Active Quests</button>
+            <button onClick={() => setActiveTab('history')} className={`pb-4 font-black text-sm uppercase tracking-widest transition-all ${activeTab === 'history' ? 'text-purple-600 border-b-2 border-purple-600' : 'text-gray-400 dark:text-zinc-500 hover:text-gray-600 dark:hover:text-zinc-300'}`}>Logbook</button>
           </div>
 
           <div className="grid grid-cols-1 gap-4">
             {displayedTasks.length === 0 ? (
-              <div className="text-center py-20 dark:bg-zinc-900/50 bg-gray-50 rounded-2xl border-2 border-dashed dark:border-zinc-800 border-gray-200">
-                <p className="dark:text-zinc-500 text-gray-400 font-bold">No quests found in this scroll.</p>
+              <div className="text-center py-24 dark:bg-zinc-900/40 bg-gray-50 rounded-[2rem] border-2 border-dashed dark:border-zinc-800 border-gray-300">
+                <p className="dark:text-zinc-600 text-gray-400 font-bold uppercase tracking-widest text-xs">No entries found in this scroll</p>
               </div>
             ) : (
               displayedTasks.map(task => (
-                <div key={task.id} className="group flex items-center justify-between p-6 dark:bg-zinc-900 bg-white border dark:border-zinc-800 border-gray-100 rounded-2xl shadow-sm hover:shadow-md transition-all">
+                <div key={task.id} className="group flex items-center justify-between p-7 dark:bg-zinc-900 bg-white border dark:border-zinc-800 border-gray-100 rounded-[2rem] hover:shadow-xl transition-all animate-in slide-in-from-bottom-2">
                   <div className="flex flex-col gap-2">
-                    <h3 className={`font-bold text-lg ${task.completed ? 'text-gray-400 line-through' : 'dark:text-zinc-100 text-zinc-900'}`}>{task.title}</h3>
-                    <div className="flex gap-2">
-                      <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md dark:bg-zinc-800 bg-gray-100 dark:text-zinc-400 text-gray-500 border dark:border-zinc-700 border-gray-200">
-                        {task.difficulty}
-                      </span>
+                    <h3 className={`font-bold text-xl ${task.completed ? 'text-gray-400 dark:text-zinc-600 line-through' : 'dark:text-zinc-100 text-zinc-900'}`}>{task.title}</h3>
+                    <div className="flex gap-3 items-center mt-1">
+                      <span className="text-[10px] font-black uppercase px-2.5 py-1 rounded-lg dark:bg-zinc-800 bg-gray-100 dark:text-zinc-400 text-gray-500 border dark:border-zinc-700 border-gray-200">{task.difficulty}</span>
+                      {task.dueDate && <span className="text-[10px] font-bold text-purple-600 dark:text-purple-400 uppercase">📅 {new Date(task.dueDate).toLocaleDateString()}</span>}
                     </div>
                   </div>
-                  <div className="flex gap-3">
+                  <div className="flex gap-4">
                     {!task.completed && (
-                      <button 
-                        onClick={() => completeTask(task)} 
-                        className="bg-purple-600 text-white px-6 py-2.5 rounded-xl font-black text-sm hover:bg-purple-700 shadow-lg shadow-purple-500/20 active:scale-95 transition-all"
-                      >
-                        CHECK
-                      </button>
+                      <button onClick={() => completeTask(task)} className="bg-purple-600 text-white px-8 py-3 rounded-2xl font-black text-xs hover:bg-purple-700 transition-all shadow-lg shadow-purple-500/20 active:scale-95">CHECK</button>
                     )}
-                    <button onClick={() => deleteTask(task.id)} className="p-2.5 rounded-xl dark:bg-zinc-800 bg-gray-100 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
-                      🗑️
-                    </button>
+                    <button onClick={() => deleteTask(task.id)} className="p-3 rounded-2xl dark:bg-zinc-800 bg-gray-100 text-red-500 opacity-0 group-hover:opacity-100 transition-all hover:bg-red-50 dark:hover:bg-red-500/10">🗑️</button>
                   </div>
                 </div>
               ))
             )}
           </div>
-        </section>
+        </div>
       </div>
 
-      {/* --- REFINED SETTINGS MODAL --- */}
-      {showSettings && (
-        <div className="fixed inset-0 bg-zinc-950/80 backdrop-blur-sm flex justify-center items-center z-50 p-6">
-          <div className="dark:bg-zinc-900 bg-white p-8 rounded-3xl shadow-2xl border dark:border-zinc-800 border-gray-100 w-full max-w-md animate-in zoom-in duration-300">
-            <h2 className="text-2xl font-black dark:text-white text-zinc-900 mb-6">Profile Settings</h2>
+      {/* MODALS */}
+      {activeModal === 'profile' && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-white dark:bg-zinc-900 p-8 sm:p-10 rounded-[2.5rem] w-full max-w-md shadow-2xl border dark:border-zinc-800 border-gray-100 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-3xl font-black mb-8 tracking-tighter">Your Profile</h2>
+            <div className="space-y-6">
+               <div>
+                 <label className="text-[11px] font-black uppercase text-zinc-500 block mb-3 ml-1 tracking-widest">Hero Name</label>
+                 <input className="w-full p-5 rounded-2xl dark:bg-zinc-950 bg-gray-50 border dark:border-zinc-800 border-gray-200 outline-none focus:ring-2 focus:ring-purple-500/50 text-lg font-bold" value={userData.name} onChange={async e => await updateDoc(doc(db, "users", user.uid), { name: e.target.value })} />
+               </div>
+               <div>
+                 <label className="text-[11px] font-black uppercase text-zinc-500 block mb-3 ml-1 tracking-widest">Hero Age</label>
+                 <input type="number" className="w-full p-5 rounded-2xl dark:bg-zinc-950 bg-gray-50 border dark:border-zinc-800 border-gray-200 outline-none focus:ring-2 focus:ring-purple-500/50 text-lg font-bold" value={userData.age} onChange={async e => await updateDoc(doc(db, "users", user.uid), { age: e.target.value })} />
+               </div>
+               <div>
+                 <label className="text-[11px] font-black uppercase text-zinc-500 block mb-3 ml-1 tracking-widest">Hero Bio</label>
+                 <textarea className="w-full p-5 rounded-2xl dark:bg-zinc-950 bg-gray-50 border dark:border-zinc-800 border-gray-200 outline-none focus:ring-2 focus:ring-purple-500/50 h-32 resize-none text-base font-medium" value={userData.bio} onChange={async e => await updateDoc(doc(db, "users", user.uid), { bio: e.target.value })} />
+               </div>
+            </div>
+            <button onClick={() => setActiveModal(null)} className="w-full bg-purple-600 text-white p-5 rounded-[1.5rem] font-black mt-10 hover:bg-purple-700 transition-all shadow-xl shadow-purple-500/20 active:scale-95">SAVE JOURNEY</button>
+          </div>
+        </div>
+      )}
+
+      {activeModal === 'settings' && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-white dark:bg-zinc-900 p-8 sm:p-10 rounded-[2.5rem] w-full max-w-md shadow-2xl border dark:border-zinc-800 border-gray-100 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-3xl font-black mb-10 tracking-tighter">Account Settings</h2>
             
-            <div className="space-y-4">
-              <div>
-                <label className="text-xs font-black dark:text-zinc-500 text-gray-400 uppercase tracking-widest block mb-2">Hero Identity</label>
-                <input 
-                  value={editProfile.name} 
-                  onChange={e => setEditProfile({...editProfile, name: e.target.value})} 
-                  placeholder="Hero Name"
-                  className="w-full dark:bg-zinc-950 bg-gray-50 p-4 rounded-xl dark:text-white text-zinc-900 border dark:border-zinc-800 border-gray-200 focus:ring-2 focus:ring-purple-500/40 outline-none transition-all" 
-                />
+            <div className="space-y-6">
+              <div className="p-7 dark:bg-zinc-950 bg-gray-50 rounded-[2rem] border dark:border-zinc-800 border-gray-200">
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <span className="font-black text-lg block tracking-tight">Hard Mode</span>
+                    <span className="text-[10px] text-zinc-500 uppercase font-black tracking-widest">High Stakes Discipline</span>
+                  </div>
+                  <button 
+                    onClick={async () => await updateDoc(doc(db, "users", user.uid), { hardMode: !userData.hardMode })}
+                    className={`w-16 h-8 rounded-full transition-all flex-shrink-0 relative ${userData.hardMode ? 'bg-red-600 shadow-[0_0_15px_rgba(220,38,38,0.4)]' : 'dark:bg-zinc-700 bg-gray-300'}`}
+                  >
+                    <div className={`absolute top-1.5 w-5 h-5 bg-white rounded-full transition-all ${userData.hardMode ? 'left-9' : 'left-1.5'}`}></div>
+                  </button>
+                </div>
+                
+                <div className="text-[14px] leading-relaxed dark:text-zinc-400 text-gray-600 space-y-4 border-t dark:border-zinc-800 border-gray-200 pt-6 font-medium">
+                  <p>🟢 <strong className="dark:text-zinc-200 text-zinc-900">Normal:</strong> Standard XP rewards. No penalties.</p>
+                  <p>🔴 <strong className="dark:text-zinc-200 text-zinc-900 font-black">Hard Mode:</strong> Earn <span className="text-green-500 font-black">1.5x XP</span>. If you go 48hrs without a quest, your <span className="text-red-500 font-black">streak resets</span> and you <span className="text-red-500 font-black">lose 50 XP</span>.</p>
+                </div>
               </div>
               
-              <div className="grid grid-cols-2 gap-4">
-                <input 
-                  type="number" 
-                  value={editProfile.age} 
-                  onChange={e => setEditProfile({...editProfile, age: e.target.value})} 
-                  placeholder="Age"
-                  className="w-full dark:bg-zinc-950 bg-gray-50 p-4 rounded-xl dark:text-white text-zinc-900 border dark:border-zinc-800 border-gray-200 focus:ring-2 focus:ring-purple-500/40 outline-none transition-all" 
-                />
-                <select 
-                  value={editProfile.heroClass} 
-                  onChange={e => setEditProfile({...editProfile, heroClass: e.target.value})} 
-                  className="w-full dark:bg-zinc-950 bg-gray-50 p-4 rounded-xl dark:text-white text-zinc-900 border dark:border-zinc-800 border-gray-200 focus:ring-2 focus:ring-purple-500/40 outline-none transition-all"
-                >
-                  <option value="Novice">Novice</option>
-                  <option value="Warrior">Warrior</option>
-                  <option value="Scholar">Scholar</option>
-                  <option value="Stoic">Stoic</option>
-                </select>
+              <button onClick={() => setIsDarkMode(!isDarkMode)} className="w-full p-6 rounded-[1.5rem] dark:bg-zinc-950 bg-gray-50 border dark:border-zinc-800 border-gray-200 font-black text-left flex justify-between items-center text-lg hover:dark:bg-zinc-800 hover:bg-gray-100 transition-all">
+                <span>Visual Theme</span>
+                <span>{isDarkMode ? '🌙' : '☀️'}</span>
+              </button>
+
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <button onClick={resetAllProgress} className="w-full p-4 rounded-2xl border dark:border-orange-500/30 border-orange-200 text-orange-500 font-black text-center text-xs hover:bg-orange-50 dark:hover:bg-orange-500/10 transition-all">
+                  Reset Progress
+                </button>
+                
+                {/* 🌟 NEW: The Delete Account Button */}
+                <button onClick={deleteAccount} className="w-full p-4 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-500 font-black text-center text-xs hover:bg-red-500/20 transition-all">
+                  💀 Delete Account
+                </button>
               </div>
 
-              <textarea 
-                value={editProfile.bio} 
-                onChange={e => setEditProfile({...editProfile, bio: e.target.value})} 
-                placeholder="Personal Bio / Moto"
-                className="w-full dark:bg-zinc-950 bg-gray-50 p-4 rounded-xl dark:text-white text-zinc-900 border dark:border-zinc-800 border-gray-200 focus:ring-2 focus:ring-purple-500/40 outline-none transition-all h-28 resize-none"
-              ></textarea>
-
-              <div className="flex items-center justify-between p-4 dark:bg-zinc-950 bg-gray-50 rounded-xl border dark:border-zinc-800 border-gray-200">
-                <span className="text-sm font-bold dark:text-zinc-400 text-gray-600">Visual Theme</span>
-                <button onClick={() => setIsDarkMode(!isDarkMode)} className="text-xl px-4 py-1">{isDarkMode ? "☀️" : "🌙"}</button>
-              </div>
             </div>
-
-            <div className="flex gap-4 mt-8">
-              <button onClick={() => setShowSettings(false)} className="flex-1 px-6 py-3 rounded-xl dark:text-zinc-400 text-gray-500 font-bold hover:dark:bg-zinc-800 hover:bg-gray-100 transition-colors">Cancel</button>
-              <button onClick={saveSettings} className="flex-1 bg-purple-600 text-white px-6 py-3 rounded-xl font-black hover:bg-purple-700 shadow-lg shadow-purple-500/20 transition-all">Save Changes</button>
-            </div>
+            
+            <button onClick={() => setActiveModal(null)} className="w-full dark:bg-zinc-800 bg-gray-200 dark:text-white text-zinc-800 p-5 rounded-[1.5rem] font-black mt-8 hover:dark:bg-zinc-700 hover:bg-gray-300 transition-all active:scale-95">CLOSE</button>
           </div>
         </div>
       )}
