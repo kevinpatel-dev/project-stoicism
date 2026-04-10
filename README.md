@@ -1,5 +1,7 @@
 # 🏛️ Project Stoicism
 
+(https://project-stoicism.web.app/)
+
 Project Stoicism is a full-stack, gamified task manager built to turn your daily disciplines into an RPG experience. Instead of just ticking off boxes, you complete quests, earn XP, maintain streaks, and level up your life.
 
 **Note:** This project is still incomplete and I have a lot more ideas I want to put into this! It's my first project so I won't make it too complicated. 
@@ -31,4 +33,5 @@ To run Project Stoicism on your own machine:
    git clone [https://github.com/kevinpatel-dev/project-stoicism.git](https://github.com/kevinpatel-dev/project-stoicism.git)
 
 With Love,
+
 Kevin.
