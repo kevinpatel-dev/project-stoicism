@@ -1,4 +1,40 @@
-return (
+import React, { useState } from 'react';
+import { db } from '../firebase';
+import { collection, addDoc } from 'firebase/firestore';
+import DatePicker from 'react-datepicker';
+import 'react-datepicker/dist/react-datepicker.css';
+
+const TaskForm = ({ userId }) => {
+  const [title, setTitle] = useState('');
+  const [difficulty, setDifficulty] = useState('easy');
+  const [priority, setPriority] = useState('low');
+  const [dueDate, setDueDate] = useState(null); 
+
+  const calculateReward = () => {
+    const diffXp = { easy: 10, medium: 25, hard: 50 }[difficulty] || 10;
+    const priXp = { low: 0, medium: 5, high: 10 }[priority] || 0;
+    return diffXp + priXp;
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!title.trim()) return;
+
+    await addDoc(collection(db, "tasks"), {
+      userId,
+      title,
+      difficulty,
+      priority,
+      dueDate: dueDate ? dueDate.toISOString() : null, 
+      completed: false,
+      createdAt: new Date().getTime() 
+    });
+    
+    setTitle(''); 
+    setDueDate(null);
+  };
+
+  return (
     <form onSubmit={handleSubmit} className="dark:bg-zinc-900 bg-white p-6 sm:p-8 rounded-xl shadow-lg border dark:border-purple-900/50 border-purple-200 mb-8 relative">
       
       {/* 🌟 WRAPPED THE ORB: This keeps the glow inside the box without trapping the calendar! */}
@@ -65,3 +101,6 @@ return (
       </button>
     </form>
   );
+};
+
+export default TaskForm;
