@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { db } from '../firebase';
 import { collection, addDoc } from 'firebase/firestore';
-// 🌟 Import the new DatePicker and its default CSS
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 
@@ -9,7 +8,7 @@ const TaskForm = ({ userId }) => {
   const [title, setTitle] = useState('');
   const [difficulty, setDifficulty] = useState('easy');
   const [priority, setPriority] = useState('low');
-  const [dueDate, setDueDate] = useState(null); // Now starts as null instead of empty string
+  const [dueDate, setDueDate] = useState(null); 
 
   const calculateReward = () => {
     const diffXp = { easy: 10, medium: 25, hard: 50 }[difficulty] || 10;
@@ -26,7 +25,6 @@ const TaskForm = ({ userId }) => {
       title,
       difficulty,
       priority,
-      // Convert Date object to string so it saves nicely in Firebase
       dueDate: dueDate ? dueDate.toISOString() : null, 
       completed: false,
       createdAt: new Date().getTime() 
@@ -41,10 +39,18 @@ const TaskForm = ({ userId }) => {
       
       <div className="absolute top-0 right-0 w-64 h-64 bg-purple-900/20 rounded-full blur-3xl pointer-events-none -mr-10 -mt-10"></div>
 
-      {/* 🌟 CHANGED: z-10 is now z-50 so it floats above the button */}
+      {/* 🌟 z-50 keeps the inputs above the button */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-4 mb-6 relative z-50">
         
-        {/* ... (Quest Title Input is here) ... */}
+        {/* 🌟 THE MISSING TITLE INPUT IS BACK! */}
+        <div className="md:col-span-4">
+          <label className="block text-sm font-bold text-purple-600 dark:text-purple-400 mb-1">New Quest</label>
+          <input 
+            value={title} onChange={(e) => setTitle(e.target.value)}
+            className="w-full border dark:border-zinc-700 border-gray-300 p-3 rounded dark:bg-zinc-800 bg-gray-50 dark:text-white text-black focus:outline-none focus:border-purple-500 transition-colors" 
+            placeholder="Quest description..."
+          />
+        </div>
 
         <div className="md:col-span-4">
           <label className="block text-sm font-bold text-gray-500 dark:text-gray-400 mb-1">
@@ -61,11 +67,9 @@ const TaskForm = ({ userId }) => {
             placeholderText="Select date & time"
             className="w-full border dark:border-zinc-700 border-gray-300 p-3 rounded dark:bg-zinc-800 bg-gray-50 dark:text-white text-black focus:outline-none focus:border-purple-500 transition-colors cursor-pointer"
             wrapperClassName="w-full"
-            popperClassName="z-[100]" /* 🌟 ADDED THIS: Forces calendar to the very front */
+            popperClassName="z-[100]" /* 🌟 Forces calendar to the front */
           />
         </div>
-
-        {/* ... (Difficulty and Priority Selects are here) ... */}
 
         <div className="md:col-span-2">
           <label className="block text-sm font-bold text-gray-500 dark:text-gray-400 mb-1">Difficulty</label>
