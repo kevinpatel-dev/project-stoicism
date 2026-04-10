@@ -67,8 +67,8 @@ const TaskForm = ({ userId }) => {
             placeholderText="Select date & time"
             className="w-full border dark:border-zinc-700 border-gray-300 p-3 rounded dark:bg-zinc-800 bg-gray-50 dark:text-white text-black focus:outline-none focus:border-purple-500 transition-colors cursor-pointer"
             wrapperClassName="w-full"
-            popperClassName="z-[100]" /* 🌟 Forces calendar to the front */
             portalId="date-portal"
+            popperClassName="z-[100]"
           />
         </div>
 
