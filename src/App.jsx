@@ -21,12 +21,13 @@ function App() {
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   
-  // 🌟 Dark Mode State
+  // 🌟 Loading State Added
+  const [isLoading, setIsLoading] = useState(false);
+  
   const [isDarkMode, setIsDarkMode] = useState(() => {
     return localStorage.getItem('theme') !== 'light';
   });
 
-  // Apply dark mode to the HTML root
   useEffect(() => {
     if (isDarkMode) {
       document.documentElement.classList.add('dark');
@@ -38,12 +39,16 @@ function App() {
   }, [isDarkMode]);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setIsLoading(false); // Stop loading if auth state changes successfully
+    });
     return () => unsubscribe();
   }, []);
 
   const handleEmailAuth = async (e, isLogin) => {
     e.preventDefault();
+    setIsLoading(true); // Start loading
     try {
       const persistenceType = rememberMe ? browserLocalPersistence : browserSessionPersistence;
       await setPersistence(auth, persistenceType);
@@ -51,32 +56,34 @@ function App() {
       await action(auth, email, password);
     } catch (err) {
       alert(err.message);
+      setIsLoading(false); // Stop loading if there's an error
     }
   };
 
-  // 🌟 Google Login
   const handleGoogleLogin = async (e) => {
     e.preventDefault();
+    setIsLoading(true);
     try {
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
     } catch (err) {
       alert(err.message);
+      setIsLoading(false);
     }
   };
 
-  // 🌟 Guest Login
   const handleGuestLogin = async (e) => {
     e.preventDefault();
+    setIsLoading(true);
     try {
       await signInAnonymously(auth);
     } catch (err) {
       alert(err.message);
+      setIsLoading(false);
     }
   };
 
   return (
-    // Added light/dark mode transition classes to the main background
     <div className="min-h-screen transition-colors duration-300 dark:bg-zinc-950 dark:text-gray-200 bg-gray-50 text-zinc-900 font-sans">
       <nav className="dark:bg-purple-900 bg-purple-700 p-4 shadow-lg flex justify-between items-center text-white border-b dark:border-purple-700 border-purple-800">
         <h1 className="text-2xl font-bold tracking-wider text-yellow-400">🏛️ PROJECT STOICISM</h1>
@@ -93,14 +100,16 @@ function App() {
             <form className="flex flex-col gap-4">
               <input 
                 type="email" placeholder="Email" 
-                className="border dark:border-zinc-700 border-gray-300 dark:bg-zinc-800 bg-gray-50 dark:text-white text-black p-3 rounded focus:outline-none focus:border-purple-500" 
+                disabled={isLoading}
+                className="border dark:border-zinc-700 border-gray-300 dark:bg-zinc-800 bg-gray-50 dark:text-white text-black p-3 rounded focus:outline-none focus:border-purple-500 disabled:opacity-50" 
                 onChange={e => setEmail(e.target.value)} 
               />
               
               <div className="relative">
                 <input 
                   type={showPassword ? "text" : "password"} placeholder="Password" 
-                  className="w-full border dark:border-zinc-700 border-gray-300 dark:bg-zinc-800 bg-gray-50 dark:text-white text-black p-3 rounded focus:outline-none focus:border-purple-500" 
+                  disabled={isLoading}
+                  className="w-full border dark:border-zinc-700 border-gray-300 dark:bg-zinc-800 bg-gray-50 dark:text-white text-black p-3 rounded focus:outline-none focus:border-purple-500 disabled:opacity-50" 
                   onChange={e => setPassword(e.target.value)} 
                 />
                 <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-3 text-gray-400 hover:text-gray-600 dark:hover:text-white">
@@ -113,25 +122,29 @@ function App() {
                 <label htmlFor="remember" className="cursor-pointer">Remember me</label>
               </div>
 
+              {/* 🌟 Added Disabled states and loading text to buttons */}
               <div className="flex gap-4 mt-2">
-                <button onClick={(e) => handleEmailAuth(e, true)} className="flex-1 bg-purple-700 text-white p-3 rounded font-bold hover:bg-purple-600 transition">Login</button>
-                <button onClick={(e) => handleEmailAuth(e, false)} className="flex-1 dark:bg-zinc-700 bg-gray-200 dark:text-white text-zinc-800 p-3 rounded font-bold hover:bg-gray-300 dark:hover:bg-zinc-600 transition">Sign Up</button>
+                <button onClick={(e) => handleEmailAuth(e, true)} disabled={isLoading} className="flex-1 bg-purple-700 text-white p-3 rounded font-bold hover:bg-purple-600 transition disabled:opacity-70 flex justify-center items-center">
+                  {isLoading ? 'Logging in...' : 'Login'}
+                </button>
+                <button onClick={(e) => handleEmailAuth(e, false)} disabled={isLoading} className="flex-1 dark:bg-zinc-700 bg-gray-200 dark:text-white text-zinc-800 p-3 rounded font-bold hover:bg-gray-300 dark:hover:bg-zinc-600 transition disabled:opacity-70">
+                  {isLoading ? 'Wait...' : 'Sign Up'}
+                </button>
               </div>
 
-              {/* 🌟 New Login Options */}
               <div className="relative flex items-center py-4">
                 <div className="flex-grow border-t dark:border-zinc-700 border-gray-300"></div>
                 <span className="flex-shrink-0 mx-4 dark:text-gray-500 text-gray-400 text-sm">OR</span>
                 <div className="flex-grow border-t dark:border-zinc-700 border-gray-300"></div>
               </div>
 
-              <button onClick={handleGoogleLogin} className="w-full bg-white text-gray-800 border border-gray-300 p-3 rounded font-bold hover:bg-gray-100 transition flex justify-center items-center gap-2">
+              <button onClick={handleGoogleLogin} disabled={isLoading} className="w-full bg-white text-gray-800 border border-gray-300 p-3 rounded font-bold hover:bg-gray-100 transition flex justify-center items-center gap-2 disabled:opacity-70">
                 <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google" className="w-5 h-5" />
-                Continue with Google
+                {isLoading ? 'Authenticating...' : 'Continue with Google'}
               </button>
               
-              <button onClick={handleGuestLogin} className="w-full dark:bg-zinc-800 bg-gray-800 text-white p-3 rounded font-bold hover:bg-gray-700 transition">
-                Play as Guest
+              <button onClick={handleGuestLogin} disabled={isLoading} className="w-full dark:bg-zinc-800 bg-gray-800 text-white p-3 rounded font-bold hover:bg-gray-700 transition disabled:opacity-70">
+                {isLoading ? 'Entering Arena...' : 'Play as Guest'}
               </button>
             </form>
 
