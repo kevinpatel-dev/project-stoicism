@@ -41,21 +41,15 @@ const TaskForm = ({ userId }) => {
       
       <div className="absolute top-0 right-0 w-64 h-64 bg-purple-900/20 rounded-full blur-3xl pointer-events-none -mr-10 -mt-10"></div>
 
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-4 mb-6 relative z-10">
-        <div className="md:col-span-4">
-          <label className="block text-sm font-bold text-purple-600 dark:text-purple-400 mb-1">New Quest</label>
-          <input 
-            value={title} onChange={(e) => setTitle(e.target.value)}
-            className="w-full border dark:border-zinc-700 border-gray-300 p-3 rounded dark:bg-zinc-800 bg-gray-50 dark:text-white text-black focus:outline-none focus:border-purple-500 transition-colors" 
-            placeholder="Quest description..."
-          />
-        </div>
+      {/* 🌟 CHANGED: z-10 is now z-50 so it floats above the button */}
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-4 mb-6 relative z-50">
         
+        {/* ... (Quest Title Input is here) ... */}
+
         <div className="md:col-span-4">
           <label className="block text-sm font-bold text-gray-500 dark:text-gray-400 mb-1">
             Due Date <span className="dark:text-zinc-500 text-gray-400 font-normal text-xs">(optional)</span>
           </label>
-          {/* 🌟 The New Modern DatePicker */}
           <DatePicker
             selected={dueDate}
             onChange={(date) => setDueDate(date)}
@@ -67,8 +61,11 @@ const TaskForm = ({ userId }) => {
             placeholderText="Select date & time"
             className="w-full border dark:border-zinc-700 border-gray-300 p-3 rounded dark:bg-zinc-800 bg-gray-50 dark:text-white text-black focus:outline-none focus:border-purple-500 transition-colors cursor-pointer"
             wrapperClassName="w-full"
+            popperClassName="z-[100]" /* 🌟 ADDED THIS: Forces calendar to the very front */
           />
         </div>
+
+        {/* ... (Difficulty and Priority Selects are here) ... */}
 
         <div className="md:col-span-2">
           <label className="block text-sm font-bold text-gray-500 dark:text-gray-400 mb-1">Difficulty</label>
