@@ -30,5 +30,5 @@ To run Project Stoicism on your own machine:
    ```bash
    git clone [https://github.com/kevinpatel-dev/project-stoicism.git](https://github.com/kevinpatel-dev/project-stoicism.git)
 
-   With Love,
-   Kevin.
+With Love,
+Kevin.
