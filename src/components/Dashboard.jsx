@@ -3,16 +3,23 @@ import { db } from '../firebase';
 import { doc, onSnapshot, updateDoc, collection, query, where, deleteDoc, setDoc, getDocs } from 'firebase/firestore';
 import { deleteUser } from 'firebase/auth';
 import TaskForm from './TaskForm';
+import { calculateTaskReward } from '../utils/xpCalculator';
 
 const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModal }) => {
   const [userData, setUserData] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [activeTab, setActiveTab] = useState('active');
+  
+  // Overlays & Onboarding
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [heroNameInput, setHeroNameInput] = useState('');
-  
-  // Level Up Overlay State
   const [levelUpData, setLevelUpData] = useState(null);
+
+  // Profile Edit Local State
+  const [editName, setEditName] = useState('');
+  const [editAge, setEditAge] = useState('');
+  const [editBio, setEditBio] = useState('');
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
 
   const classTiers = [
     { name: "Novice", minLevel: 1, maxLevel: 5 },
@@ -28,6 +35,15 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
     return tier ? tier.name : "Novice";
   };
 
+  // Sync profile edit inputs when modal opens
+  useEffect(() => {
+    if (activeModal === 'profile' && userData) {
+      setEditName(userData.name || '');
+      setEditAge(userData.age || '');
+      setEditBio(userData.bio || '');
+    }
+  }, [activeModal, userData]);
+
   useEffect(() => {
     if (!user) return;
 
@@ -39,7 +55,7 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
         if (!data.name || data.name.trim() === '') setShowOnboarding(true);
         checkStreakReset(data);
       } else {
-        setDoc(userRef, { xp: 0, level: 1, streak: 0, name: '', age: '', bio: '', hardMode: false });
+        setDoc(userRef, { xp: 0, level: 1, streak: 0, name: '', age: '', bio: '', hardMode: false, streakResetNotified: false });
       }
     });
 
@@ -61,21 +77,18 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
     if (!data.lastCompletionDate) return;
     const hoursSinceLast = (new Date() - new Date(data.lastCompletionDate)) / (1000 * 60 * 60);
     
-    if (hoursSinceLast > 48 && data.streak > 0) { 
+    if (hoursSinceLast > 48 && data.streak > 0 && !data.streakResetNotified) { 
+      alert("The fire has faded. Your 48-hour window closed, and your streak has reset.");
       await updateDoc(doc(db, "users", user.uid), {
         streak: 0,
-        xp: data.hardMode ? Math.max(0, data.xp - 50) : data.xp 
+        xp: data.hardMode ? Math.max(0, data.xp - 50) : data.xp,
+        streakResetNotified: true
       });
     }
   };
 
   const completeTask = async (task) => {
-    const diffXp = { easy: 10, medium: 25, hard: 50 }[task.difficulty] || 10;
-    const priXp = { low: 0, medium: 5, high: 10 }[task.priority] || 0;
-    const baseReward = diffXp + priXp;
-    
-    const multiplier = userData.hardMode ? 1.5 : 1.0;
-    const totalReward = Math.floor(baseReward * multiplier);
+    const totalReward = calculateTaskReward(task.difficulty, task.priority, userData.hardMode);
 
     let newXp = userData.xp + totalReward;
     let newLevel = userData.level;
@@ -105,7 +118,8 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
       xp: newXp, 
       level: newLevel, 
       streak: userData.streak + 1,
-      lastCompletionDate: new Date().toISOString()
+      lastCompletionDate: new Date().toISOString(),
+      streakResetNotified: false // Reset penalty notification status
     });
   };
 
@@ -118,18 +132,19 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
   const resetAllProgress = async () => {
     const confirmMsg = "Are you sure? This will wipe your Level, XP, Streak, AND ALL QUESTS forever.";
     if (window.confirm(confirmMsg)) {
+      // Fetch and delete all tasks for this user
       const taskQuery = query(collection(db, "tasks"), where("userId", "==", user.uid));
       const taskSnap = await getDocs(taskQuery);
       taskSnap.forEach((d) => deleteDoc(d.ref));
 
+      // Reset the user document
       await updateDoc(doc(db, "users", user.uid), {
-        xp: 0, level: 1, streak: 0, hardMode: false
+        xp: 0, level: 1, streak: 0, hardMode: false, streakResetNotified: false
       });
       setActiveModal(null);
     }
   };
 
-  // 🌟 FIX: The properly formatted deleteAccount function
   const deleteAccount = async () => {
     const confirmMsg = "CRITICAL WARNING: This will permanently delete your entire account, all quests, and all progress. This action CANNOT be undone. Are you absolutely sure?";
     if (window.confirm(confirmMsg)) {
@@ -162,7 +177,7 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
   return (
     <div className="max-w-5xl mx-auto animate-in fade-in duration-500">
       
-      {/* LEVEL UP OVERLAY */}
+      {/* 🌟 LEVEL UP OVERLAY */}
       {levelUpData && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center p-6 bg-zinc-950/95 backdrop-blur-2xl animate-in zoom-in duration-300">
           <div className="text-center">
@@ -185,7 +200,7 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
         </div>
       )}
 
-      {/* ONBOARDING */}
+      {/* ONBOARDING OVERLAY */}
       {showOnboarding && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-zinc-950/98 backdrop-blur-xl animate-in zoom-in duration-500">
           <div className="text-center max-w-sm">
@@ -202,9 +217,12 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
         </div>
       )}
 
+      {/* FORM COMPONENT */}
       <TaskForm userId={user.uid} hardMode={userData.hardMode} />
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start mb-20">
+        
+        {/* STATS CARD */}
         <div className="lg:col-span-4 space-y-6 lg:sticky lg:top-24">
           <section className="dark:bg-zinc-900 bg-white p-8 rounded-[2rem] border dark:border-zinc-800 border-gray-100 shadow-xl relative overflow-hidden">
             <div className="mb-8 relative z-10">
@@ -244,6 +262,7 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
           </section>
         </div>
 
+        {/* QUEST LIST */}
         <div className="lg:col-span-8 space-y-8">
           <div className="flex gap-8 border-b dark:border-zinc-800 border-gray-200">
             <button onClick={() => setActiveTab('active')} className={`pb-4 font-black text-sm uppercase tracking-widest transition-all ${activeTab === 'active' ? 'text-purple-600 border-b-2 border-purple-600' : 'text-gray-400 dark:text-zinc-500 hover:text-gray-600 dark:hover:text-zinc-300'}`}>Active Quests</button>
@@ -288,6 +307,7 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
 
       {/* --- MODALS --- */}
       
+      {/* THE HERO'S PATH MODAL */}
       {activeModal === 'progression' && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
           <div className="bg-white dark:bg-zinc-900 p-8 sm:p-10 rounded-[2.5rem] w-full max-w-md shadow-2xl border dark:border-zinc-800 border-gray-100 max-h-[90vh] overflow-y-auto">
@@ -338,6 +358,7 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
         </div>
       )}
 
+      {/* 🌟 PROFILE MODAL (Now correctly handles state and saves) */}
       {activeModal === 'profile' && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
           <div className="bg-white dark:bg-zinc-900 p-8 sm:p-10 rounded-[2.5rem] w-full max-w-md shadow-2xl border dark:border-zinc-800 border-gray-100 max-h-[90vh] overflow-y-auto">
@@ -345,22 +366,34 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
             <div className="space-y-6">
                <div>
                  <label className="text-[11px] font-black uppercase text-zinc-500 block mb-3 ml-1 tracking-widest">Hero Name</label>
-                 <input className="w-full p-5 rounded-2xl dark:bg-zinc-950 bg-gray-50 border dark:border-zinc-800 border-gray-200 outline-none focus:ring-2 focus:ring-purple-500/50 text-lg font-bold" value={userData.name} onChange={async e => await updateDoc(doc(db, "users", user.uid), { name: e.target.value })} />
+                 <input className="w-full p-5 rounded-2xl dark:bg-zinc-950 bg-gray-50 border dark:border-zinc-800 border-gray-200 outline-none focus:ring-2 focus:ring-purple-500/50 text-lg font-bold" value={editName} onChange={e => setEditName(e.target.value)} />
                </div>
                <div>
                  <label className="text-[11px] font-black uppercase text-zinc-500 block mb-3 ml-1 tracking-widest">Hero Age</label>
-                 <input type="number" className="w-full p-5 rounded-2xl dark:bg-zinc-950 bg-gray-50 border dark:border-zinc-800 border-gray-200 outline-none focus:ring-2 focus:ring-purple-500/50 text-lg font-bold" value={userData.age} onChange={async e => await updateDoc(doc(db, "users", user.uid), { age: e.target.value })} />
+                 <input type="number" className="w-full p-5 rounded-2xl dark:bg-zinc-950 bg-gray-50 border dark:border-zinc-800 border-gray-200 outline-none focus:ring-2 focus:ring-purple-500/50 text-lg font-bold" value={editAge} onChange={e => setEditAge(e.target.value)} />
                </div>
                <div>
                  <label className="text-[11px] font-black uppercase text-zinc-500 block mb-3 ml-1 tracking-widest">Hero Bio</label>
-                 <textarea className="w-full p-5 rounded-2xl dark:bg-zinc-950 bg-gray-50 border dark:border-zinc-800 border-gray-200 outline-none focus:ring-2 focus:ring-purple-500/50 h-32 resize-none text-base font-medium" value={userData.bio} onChange={async e => await updateDoc(doc(db, "users", user.uid), { bio: e.target.value })} />
+                 <textarea className="w-full p-5 rounded-2xl dark:bg-zinc-950 bg-gray-50 border dark:border-zinc-800 border-gray-200 outline-none focus:ring-2 focus:ring-purple-500/50 h-32 resize-none text-base font-medium" value={editBio} onChange={e => setEditBio(e.target.value)} />
                </div>
             </div>
-            <button onClick={() => setActiveModal(null)} className="w-full bg-purple-600 text-white p-5 rounded-[1.5rem] font-black mt-10 hover:bg-purple-700 transition-all shadow-xl shadow-purple-500/20 active:scale-95">SAVE JOURNEY</button>
+            
+            <div className="flex gap-3 mt-10">
+              <button onClick={() => setActiveModal(null)} className="flex-1 dark:bg-zinc-800 bg-gray-200 dark:text-white text-zinc-800 p-5 rounded-[1.5rem] font-black hover:dark:bg-zinc-700 hover:bg-gray-300 transition-all active:scale-95">CANCEL</button>
+              <button disabled={isSavingProfile} onClick={async () => {
+                setIsSavingProfile(true);
+                await updateDoc(doc(db, "users", user.uid), { name: editName, age: editAge, bio: editBio });
+                setIsSavingProfile(false);
+                setActiveModal(null);
+              }} className="flex-1 bg-purple-600 text-white p-5 rounded-[1.5rem] font-black hover:bg-purple-700 transition-all shadow-xl shadow-purple-500/20 active:scale-95 disabled:opacity-50">
+                {isSavingProfile ? 'SAVING...' : 'SAVE'}
+              </button>
+            </div>
           </div>
         </div>
       )}
 
+      {/* SETTINGS MODAL */}
       {activeModal === 'settings' && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
           <div className="bg-white dark:bg-zinc-900 p-8 sm:p-10 rounded-[2.5rem] w-full max-w-md shadow-2xl border dark:border-zinc-800 border-gray-100 max-h-[90vh] overflow-y-auto">

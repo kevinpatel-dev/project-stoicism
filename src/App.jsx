@@ -46,6 +46,7 @@ function App() {
     return () => unsubscribe();
   }, []);
 
+// Replace your existing handleEmailAuth with this:
   const handleEmailAuth = async (e, isLogin) => {
     e.preventDefault();
     setIsLoading(true); 
@@ -55,7 +56,17 @@ function App() {
       const action = isLogin ? signInWithEmailAndPassword : createUserWithEmailAndPassword;
       await action(auth, email, password);
     } catch (err) {
-      alert(err.message);
+      let userMessage = "An error occurred. Please try again.";
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+        userMessage = 'Incorrect email or password. Please try again or sign up.';
+      } else if (err.code === 'auth/email-already-in-use') {
+        userMessage = 'This email is already registered. Try logging in.';
+      } else if (err.code === 'auth/weak-password') {
+        userMessage = 'Password should be at least 6 characters.';
+      } else if (err.code === 'auth/invalid-email') {
+        userMessage = 'Please enter a valid email address.';
+      }
+      alert(userMessage);
       setIsLoading(false); 
     }
   };
