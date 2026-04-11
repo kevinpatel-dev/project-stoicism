@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { doc, onSnapshot, updateDoc, collection, query, where, deleteDoc, setDoc } from 'firebase/firestore';
-// 🌟 Added deleteUser from firebase/auth
 import { deleteUser } from 'firebase/auth';
 import TaskForm from './TaskForm';
 
@@ -12,13 +11,19 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [heroNameInput, setHeroNameInput] = useState('');
 
+  // 🌟 NEW: Structured Class Data for the Roadmap
+  const classTiers = [
+    { name: "Novice", minLevel: 1, maxLevel: 5 },
+    { name: "Initiate", minLevel: 6, maxLevel: 10 },
+    { name: "Practitioner", minLevel: 11, maxLevel: 20 },
+    { name: "Scholar", minLevel: 21, maxLevel: 35 },
+    { name: "Philosopher", minLevel: 36, maxLevel: 50 },
+    { name: "Sage", minLevel: 51, maxLevel: '∞' },
+  ];
+
   const getHeroClass = (level) => {
-    if (level <= 5) return "Novice";
-    if (level <= 10) return "Initiate";
-    if (level <= 20) return "Practitioner";
-    if (level <= 35) return "Scholar";
-    if (level <= 50) return "Philosopher";
-    return "Sage";
+    const tier = classTiers.find(t => level >= t.minLevel && (t.maxLevel === '∞' || level <= t.maxLevel));
+    return tier ? tier.name : "Novice";
   };
 
   useEffect(() => {
@@ -100,19 +105,14 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
     }
   };
 
-  // 🌟 NEW: The Ultimate Delete Function
   const deleteAccount = async () => {
     const confirmMsg = "CRITICAL WARNING: This will permanently delete your entire account, all quests, and all progress. This action CANNOT be undone. Are you absolutely sure?";
     if (window.confirm(confirmMsg)) {
       try {
-        // 1. Delete their profile data document
         await deleteDoc(doc(db, "users", user.uid));
-        // 2. Delete the actual authentication user
         await deleteUser(user);
-        // App.jsx will automatically see the user is gone and throw them to the login screen!
       } catch (error) {
         console.error("Account deletion failed:", error);
-        // Firebase security check: Did they log in too long ago?
         if (error.code === 'auth/requires-recent-login') {
           alert("For your security, please log out and log back in right now before deleting your account.");
         } else {
@@ -129,6 +129,11 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 
   const xpToNextLevel = Math.pow(userData.level, 2) * 100;
+  
+  // Logic for the Roadmap Modal
+  const currentTierIndex = classTiers.findIndex(t => userData.level >= t.minLevel && (t.maxLevel === '∞' || userData.level <= t.maxLevel));
+  const nextTier = classTiers[currentTierIndex + 1];
+  const levelsToNextClass = nextTier ? nextTier.minLevel - userData.level : 0;
 
   return (
     <div className="max-w-5xl mx-auto animate-in fade-in duration-500">
@@ -156,9 +161,14 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
           <section className="dark:bg-zinc-900 bg-white p-8 rounded-[2rem] border dark:border-zinc-800 border-gray-100 shadow-xl relative overflow-hidden">
             <div className="mb-8 relative z-10">
               <h3 className="text-4xl font-black truncate tracking-tight">{userData.name || "Hero"}</h3>
-              <span className="inline-block mt-3 px-4 py-1.5 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 text-[10px] font-black uppercase tracking-[0.2em] border border-purple-500/20">
-                {getHeroClass(userData.level)}
-              </span>
+              
+              {/* 🌟 FIX: Made the badge an interactive button! */}
+              <button 
+                onClick={() => setActiveModal('progression')}
+                className="inline-block mt-3 px-4 py-1.5 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 text-[10px] font-black uppercase tracking-[0.2em] border border-purple-500/20 hover:bg-purple-500/20 hover:scale-105 transition-all cursor-pointer shadow-sm active:scale-95"
+              >
+                {getHeroClass(userData.level)} <span>ℹ️</span>
+              </button>
             </div>
             
             <div className="space-y-10 relative z-10">
@@ -222,7 +232,61 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
         </div>
       </div>
 
-      {/* MODALS */}
+      {/* --- MODALS --- */}
+      
+      {/* 🌟 NEW: THE PROGRESSION ROADMAP MODAL */}
+      {activeModal === 'progression' && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-white dark:bg-zinc-900 p-8 sm:p-10 rounded-[2.5rem] w-full max-w-md shadow-2xl border dark:border-zinc-800 border-gray-100 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-3xl font-black mb-2 tracking-tighter">The Hero's Path</h2>
+            <p className="text-zinc-500 text-sm font-bold mb-8">Rise through the ranks with daily discipline.</p>
+
+            <div className="space-y-3">
+              {classTiers.map((tier) => {
+                const isCurrent = userData.level >= tier.minLevel && (tier.maxLevel === '∞' || userData.level <= tier.maxLevel);
+                const isPassed = userData.level > (tier.maxLevel === '∞' ? 999 : tier.maxLevel);
+                
+                return (
+                  <div key={tier.name} className={`p-5 rounded-[1.5rem] border flex items-center justify-between transition-all ${isCurrent ? 'bg-purple-500/10 border-purple-500/30 shadow-lg shadow-purple-500/10' : isPassed ? 'dark:bg-zinc-950 bg-gray-50 border-green-500/20' : 'dark:bg-zinc-950/40 bg-gray-50/50 border-gray-200 dark:border-zinc-800 opacity-60'}`}>
+                    <div className="flex items-center gap-5">
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-black ${isCurrent ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/40' : isPassed ? 'bg-green-500/20 text-green-500' : 'bg-gray-200 dark:bg-zinc-800 text-gray-400'}`}>
+                          {isPassed ? '✓' : tier.minLevel}
+                        </div>
+                        <div>
+                          <h4 className={`font-black text-lg ${isCurrent ? 'text-purple-600 dark:text-purple-400' : isPassed ? 'text-green-600 dark:text-green-500' : 'text-gray-500 dark:text-zinc-500'}`}>{tier.name}</h4>
+                          <span className="text-[10px] uppercase tracking-widest font-bold text-zinc-500">
+                            {tier.maxLevel === '∞' ? `Level ${tier.minLevel}+` : `Levels ${tier.minLevel} - ${tier.maxLevel}`}
+                          </span>
+                        </div>
+                    </div>
+                    {isCurrent && (
+                        <div className="text-right">
+                          <span className="block text-[10px] tracking-widest font-black text-purple-500 uppercase animate-pulse">Current</span>
+                        </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Next Milestone Summary */}
+            <div className="mt-8 p-6 rounded-[1.5rem] dark:bg-zinc-950 bg-purple-50 border dark:border-zinc-800 border-purple-100 text-center shadow-inner">
+               <p className="text-sm font-bold dark:text-zinc-300 text-zinc-700 leading-relaxed">
+                 You need <span className="text-purple-600 dark:text-purple-400 font-black">{xpToNextLevel - userData.xp} XP</span> to reach Level {userData.level + 1}.
+               </p>
+               {nextTier && (
+                 <p className="text-xs font-bold text-zinc-500 mt-2">
+                   Only <span className="text-zinc-800 dark:text-zinc-200 font-black">{levelsToNextClass} levels</span> until you become an {nextTier.name}!
+                 </p>
+               )}
+            </div>
+
+            <button onClick={() => setActiveModal(null)} className="w-full dark:bg-zinc-800 bg-gray-200 dark:text-white text-zinc-800 p-5 rounded-[1.5rem] font-black mt-8 hover:dark:bg-zinc-700 hover:bg-gray-300 transition-all active:scale-95">CLOSE MAP</button>
+          </div>
+        </div>
+      )}
+
+      {/* Profile Modal */}
       {activeModal === 'profile' && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
           <div className="bg-white dark:bg-zinc-900 p-8 sm:p-10 rounded-[2.5rem] w-full max-w-md shadow-2xl border dark:border-zinc-800 border-gray-100 max-h-[90vh] overflow-y-auto">
@@ -246,6 +310,7 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
         </div>
       )}
 
+      {/* Settings Modal */}
       {activeModal === 'settings' && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
           <div className="bg-white dark:bg-zinc-900 p-8 sm:p-10 rounded-[2.5rem] w-full max-w-md shadow-2xl border dark:border-zinc-800 border-gray-100 max-h-[90vh] overflow-y-auto">
@@ -281,8 +346,6 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
                 <button onClick={resetAllProgress} className="w-full p-4 rounded-2xl border dark:border-orange-500/30 border-orange-200 text-orange-500 font-black text-center text-xs hover:bg-orange-50 dark:hover:bg-orange-500/10 transition-all">
                   Reset Progress
                 </button>
-                
-                {/* 🌟 NEW: The Delete Account Button */}
                 <button onClick={deleteAccount} className="w-full p-4 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-500 font-black text-center text-xs hover:bg-red-500/20 transition-all">
                   💀 Delete Account
                 </button>
