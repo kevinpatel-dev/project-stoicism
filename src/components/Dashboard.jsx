@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { doc, onSnapshot, updateDoc, collection, query, where, deleteDoc, setDoc } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, collection, query, where, deleteDoc, setDoc, getDocs } from 'firebase/firestore';
 import { deleteUser } from 'firebase/auth';
 import TaskForm from './TaskForm';
 
@@ -10,8 +10,10 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
   const [activeTab, setActiveTab] = useState('active');
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [heroNameInput, setHeroNameInput] = useState('');
+  
+  // Level Up Overlay State
+  const [levelUpData, setLevelUpData] = useState(null);
 
-  // 🌟 NEW: Structured Class Data for the Roadmap
   const classTiers = [
     { name: "Novice", minLevel: 1, maxLevel: 5 },
     { name: "Initiate", minLevel: 6, maxLevel: 10 },
@@ -68,7 +70,10 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
   };
 
   const completeTask = async (task) => {
-    const baseReward = ({ easy: 10, medium: 25, hard: 50 }[task.difficulty] || 10);
+    const diffXp = { easy: 10, medium: 25, hard: 50 }[task.difficulty] || 10;
+    const priXp = { low: 0, medium: 5, high: 10 }[task.priority] || 0;
+    const baseReward = diffXp + priXp;
+    
     const multiplier = userData.hardMode ? 1.5 : 1.0;
     const totalReward = Math.floor(baseReward * multiplier);
 
@@ -76,9 +81,23 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
     let newLevel = userData.level;
     const xpToNext = Math.pow(newLevel, 2) * 100;
 
+    let leveledUp = false;
+    let oldRank = getHeroClass(userData.level);
+
     if (newXp >= xpToNext) {
       newXp -= xpToNext;
       newLevel += 1;
+      leveledUp = true;
+    }
+
+    let newRank = getHeroClass(newLevel);
+
+    if (leveledUp) {
+      setLevelUpData({ 
+        level: newLevel, 
+        rank: newRank, 
+        isNewRank: newRank !== oldRank 
+      });
     }
 
     await updateDoc(doc(db, "tasks", task.id), { completed: true });
@@ -97,7 +116,12 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
   };
 
   const resetAllProgress = async () => {
-    if (window.confirm("Are you sure? This will wipe your Level, XP, and Streak forever.")) {
+    const confirmMsg = "Are you sure? This will wipe your Level, XP, Streak, AND ALL QUESTS forever.";
+    if (window.confirm(confirmMsg)) {
+      const taskQuery = query(collection(db, "tasks"), where("userId", "==", user.uid));
+      const taskSnap = await getDocs(taskQuery);
+      taskSnap.forEach((d) => deleteDoc(d.ref));
+
       await updateDoc(doc(db, "users", user.uid), {
         xp: 0, level: 1, streak: 0, hardMode: false
       });
@@ -105,6 +129,7 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
     }
   };
 
+  // 🌟 FIX: The properly formatted deleteAccount function
   const deleteAccount = async () => {
     const confirmMsg = "CRITICAL WARNING: This will permanently delete your entire account, all quests, and all progress. This action CANNOT be undone. Are you absolutely sure?";
     if (window.confirm(confirmMsg)) {
@@ -130,7 +155,6 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
 
   const xpToNextLevel = Math.pow(userData.level, 2) * 100;
   
-  // Logic for the Roadmap Modal
   const currentTierIndex = classTiers.findIndex(t => userData.level >= t.minLevel && (t.maxLevel === '∞' || userData.level <= t.maxLevel));
   const nextTier = classTiers[currentTierIndex + 1];
   const levelsToNextClass = nextTier ? nextTier.minLevel - userData.level : 0;
@@ -138,6 +162,30 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
   return (
     <div className="max-w-5xl mx-auto animate-in fade-in duration-500">
       
+      {/* LEVEL UP OVERLAY */}
+      {levelUpData && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-6 bg-zinc-950/95 backdrop-blur-2xl animate-in zoom-in duration-300">
+          <div className="text-center">
+             <h2 className="text-6xl sm:text-8xl font-black mb-4 text-transparent bg-clip-text bg-gradient-to-br from-purple-400 to-fuchsia-600 animate-pulse drop-shadow-2xl">
+               LEVEL UP!
+             </h2>
+             <p className="text-2xl sm:text-3xl font-black text-zinc-300 mb-2">You are now Level {levelUpData.level}</p>
+             
+             {levelUpData.isNewRank && (
+               <div className="mt-8 mb-4 p-8 rounded-[2rem] bg-purple-600/10 border border-purple-500/30 shadow-[0_0_50px_rgba(168,85,247,0.2)] animate-in slide-in-from-bottom-4">
+                 <p className="text-xs sm:text-sm font-black text-purple-400 uppercase tracking-[0.4em] mb-3">New Title Unlocked</p>
+                 <p className="text-4xl sm:text-5xl font-black text-white tracking-tight">{levelUpData.rank}</p>
+               </div>
+             )}
+
+             <button onClick={() => setLevelUpData(null)} className="mt-10 bg-white text-zinc-900 px-12 py-5 rounded-full font-black tracking-widest text-sm hover:bg-gray-200 transition-all shadow-[0_0_30px_rgba(255,255,255,0.2)] active:scale-95">
+               CONTINUE
+             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ONBOARDING */}
       {showOnboarding && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-zinc-950/98 backdrop-blur-xl animate-in zoom-in duration-500">
           <div className="text-center max-w-sm">
@@ -154,15 +202,13 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
         </div>
       )}
 
-      <TaskForm userId={user.uid} />
+      <TaskForm userId={user.uid} hardMode={userData.hardMode} />
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start mb-20">
         <div className="lg:col-span-4 space-y-6 lg:sticky lg:top-24">
           <section className="dark:bg-zinc-900 bg-white p-8 rounded-[2rem] border dark:border-zinc-800 border-gray-100 shadow-xl relative overflow-hidden">
             <div className="mb-8 relative z-10">
               <h3 className="text-4xl font-black truncate tracking-tight">{userData.name || "Hero"}</h3>
-              
-              {/* 🌟 FIX: Made the badge an interactive button! */}
               <button 
                 onClick={() => setActiveModal('progression')}
                 className="inline-block mt-3 px-4 py-1.5 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 text-[10px] font-black uppercase tracking-[0.2em] border border-purple-500/20 hover:bg-purple-500/20 hover:scale-105 transition-all cursor-pointer shadow-sm active:scale-95"
@@ -212,14 +258,22 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
             ) : (
               displayedTasks.map(task => (
                 <div key={task.id} className="group flex items-center justify-between p-7 dark:bg-zinc-900 bg-white border dark:border-zinc-800 border-gray-100 rounded-[2rem] hover:shadow-xl transition-all animate-in slide-in-from-bottom-2">
-                  <div className="flex flex-col gap-2">
+                  <div className="flex flex-col gap-2 w-full pr-4">
                     <h3 className={`font-bold text-xl ${task.completed ? 'text-gray-400 dark:text-zinc-600 line-through' : 'dark:text-zinc-100 text-zinc-900'}`}>{task.title}</h3>
-                    <div className="flex gap-3 items-center mt-1">
+                    
+                    {task.description && (
+                      <p className={`text-sm font-medium leading-relaxed line-clamp-2 ${task.completed ? 'text-gray-400/50 dark:text-zinc-700' : 'text-gray-500 dark:text-zinc-400'}`}>
+                        {task.description}
+                      </p>
+                    )}
+
+                    <div className="flex gap-3 items-center mt-2">
                       <span className="text-[10px] font-black uppercase px-2.5 py-1 rounded-lg dark:bg-zinc-800 bg-gray-100 dark:text-zinc-400 text-gray-500 border dark:border-zinc-700 border-gray-200">{task.difficulty}</span>
-                      {task.dueDate && <span className="text-[10px] font-bold text-purple-600 dark:text-purple-400 uppercase">📅 {new Date(task.dueDate).toLocaleDateString()}</span>}
+                      <span className="text-[10px] font-black uppercase px-2.5 py-1 rounded-lg dark:bg-zinc-800 bg-gray-100 dark:text-zinc-500 text-gray-400 border dark:border-zinc-700 border-gray-200">PRI: {task.priority}</span>
+                      {task.dueDate && <span className="text-[10px] font-bold text-purple-600 dark:text-purple-400 uppercase ml-2">📅 {new Date(task.dueDate).toLocaleDateString()}</span>}
                     </div>
                   </div>
-                  <div className="flex gap-4">
+                  <div className="flex gap-4 flex-shrink-0">
                     {!task.completed && (
                       <button onClick={() => completeTask(task)} className="bg-purple-600 text-white px-8 py-3 rounded-2xl font-black text-xs hover:bg-purple-700 transition-all shadow-lg shadow-purple-500/20 active:scale-95">CHECK</button>
                     )}
@@ -234,7 +288,6 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
 
       {/* --- MODALS --- */}
       
-      {/* 🌟 NEW: THE PROGRESSION ROADMAP MODAL */}
       {activeModal === 'progression' && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
           <div className="bg-white dark:bg-zinc-900 p-8 sm:p-10 rounded-[2.5rem] w-full max-w-md shadow-2xl border dark:border-zinc-800 border-gray-100 max-h-[90vh] overflow-y-auto">
@@ -269,7 +322,6 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
               })}
             </div>
 
-            {/* Next Milestone Summary */}
             <div className="mt-8 p-6 rounded-[1.5rem] dark:bg-zinc-950 bg-purple-50 border dark:border-zinc-800 border-purple-100 text-center shadow-inner">
                <p className="text-sm font-bold dark:text-zinc-300 text-zinc-700 leading-relaxed">
                  You need <span className="text-purple-600 dark:text-purple-400 font-black">{xpToNextLevel - userData.xp} XP</span> to reach Level {userData.level + 1}.
@@ -286,7 +338,6 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
         </div>
       )}
 
-      {/* Profile Modal */}
       {activeModal === 'profile' && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
           <div className="bg-white dark:bg-zinc-900 p-8 sm:p-10 rounded-[2.5rem] w-full max-w-md shadow-2xl border dark:border-zinc-800 border-gray-100 max-h-[90vh] overflow-y-auto">
@@ -310,7 +361,6 @@ const Dashboard = ({ user, isDarkMode, setIsDarkMode, activeModal, setActiveModa
         </div>
       )}
 
-      {/* Settings Modal */}
       {activeModal === 'settings' && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
           <div className="bg-white dark:bg-zinc-900 p-8 sm:p-10 rounded-[2.5rem] w-full max-w-md shadow-2xl border dark:border-zinc-800 border-gray-100 max-h-[90vh] overflow-y-auto">
